@@ -1,13 +1,26 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { GeminiAnalysisResult } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Lazy initialization to prevent crash on app load
+let aiInstance: GoogleGenAI | null = null;
+
+const getAiClient = () => {
+  if (!aiInstance) {
+    const apiKey = process.env.API_KEY;
+    if (!apiKey) {
+      throw new Error("API Key is missing. Please check your Vercel settings.");
+    }
+    aiInstance = new GoogleGenAI({ apiKey });
+  }
+  return aiInstance;
+};
 
 export const analyzeProductImage = async (base64Image: string): Promise<GeminiAnalysisResult> => {
   // Remove header if present (data:image/jpeg;base64,)
   const cleanBase64 = base64Image.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
 
   try {
+    const ai = getAiClient();
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: {
@@ -61,6 +74,7 @@ export const analyzeProductImage = async (base64Image: string): Promise<GeminiAn
 export const translateTextToArabic = async (text: string): Promise<string> => {
   if (!text) return "";
   try {
+    const ai = getAiClient();
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: `Translate the following product description into clear, professional Arabic. If the text is already in Arabic, improve its phrasing. Return ONLY the translated text without any explanations.\n\nText: "${text}"`,
