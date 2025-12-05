@@ -5,22 +5,30 @@ let ai: GoogleGenAI | null = null;
 
 const getAI = () => {
     if (!ai) {
-        const apiKey = process.env.API_KEY;
-        if (apiKey) {
+        // Use import.meta.env for Vite
+        const apiKey = import.meta.env.VITE_API_KEY;
+        if (apiKey && apiKey.length > 0) {
+            console.log("Gemini Service initialized.");
             ai = new GoogleGenAI({ apiKey });
         } else {
-            console.warn("API Key not found!");
+            console.error("API Key is missing! Make sure VITE_API_KEY is set in Vercel environment variables.");
         }
     }
     return ai;
 };
 
 export const analyzeProductImage = async (base64Image: string): Promise<GeminiAnalysisResult> => {
-  const client = getAI();
-  if (!client) throw new Error("API Key missing");
+  const apiKey = import.meta.env.VITE_API_KEY;
+  if (!apiKey) {
+      alert("مفتاح API مفقود! \nتأكد من تسميته VITE_API_KEY في إعدادات فيرسل.");
+      throw new Error("API Key missing");
+  }
 
-  // Remove data URL prefix
-  const base64Data = base64Image.split(',')[1];
+  const client = getAI();
+  if (!client) throw new Error("AI Client init failed");
+
+  // Remove data URL prefix if present
+  const base64Data = base64Image.includes(',') ? base64Image.split(',')[1] : base64Image;
 
   const prompt = `
     Analyze this product image. Identify the brand, product name, category, and text on the packaging (Arabic and English).
@@ -45,13 +53,18 @@ export const analyzeProductImage = async (base64Image: string): Promise<GeminiAn
     });
 
     const text = response.text || "{}";
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    // Clean markdown code blocks if present
+    const cleanText = text.replace(/```json\n?|\n?```/g, '').trim();
+    // Extract JSON object
+    const jsonMatch = cleanText.match(/\{[\s\S]*\}/);
+    
     if (jsonMatch) {
         return JSON.parse(jsonMatch[0]);
     }
+    
     throw new Error("Invalid JSON response");
   } catch (error) {
-    console.error("Gemini Error:", error);
+    console.error("Gemini Analysis Error:", error);
     return {
       detectedName: "Unknown Product",
       detectedBrand: "Unknown",
