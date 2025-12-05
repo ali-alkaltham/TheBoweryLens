@@ -1,7 +1,0 @@
-{
-  "name": "Copy of TheBoweryLens - مكتشف المنتجات",
-  "description": "Smart product identification system using Gemini AI. Upload a product database via Excel and identify products using your camera.",
-  "requestFramePermissions": [
-    "camera"
-  ]
-}
