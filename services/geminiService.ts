@@ -5,23 +5,23 @@ let ai: GoogleGenAI | null = null;
 
 const getAI = () => {
     if (!ai) {
-        // Use import.meta.env for Vite
-        const apiKey = import.meta.env.VITE_API_KEY;
+        // Now exclusively using process.env.API_KEY as configured in vite.config.ts
+        const apiKey = process.env.API_KEY;
         if (apiKey && apiKey.length > 0) {
             console.log("Gemini Service initialized.");
             ai = new GoogleGenAI({ apiKey });
         } else {
-            console.error("API Key is missing! Make sure VITE_API_KEY is set in Vercel environment variables.");
+            console.error("API Key is missing! Please check Vercel environment variables.");
         }
     }
     return ai;
 };
 
 export const analyzeProductImage = async (base64Image: string): Promise<GeminiAnalysisResult> => {
-  const apiKey = import.meta.env.VITE_API_KEY;
+  const apiKey = process.env.API_KEY;
   if (!apiKey) {
-      alert("مفتاح API مفقود! \nتأكد من تسميته VITE_API_KEY في إعدادات فيرسل.");
-      throw new Error("API Key missing");
+      console.error("API Key missing in process.env");
+      throw new Error("API Key missing. Check configuration.");
   }
 
   const client = getAI();
