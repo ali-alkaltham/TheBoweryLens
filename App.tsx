@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ScanLine, Settings, Database, Search, ChevronRight, AlertCircle, Sparkles, X, Tag, Moon, Sun, Globe, Image as ImageIcon, Camera, Languages, Loader2 } from 'lucide-react';
+import { ScanLine, Settings, Database, Search, ChevronRight, AlertCircle, Sparkles, X, Tag, Moon, Sun, Globe, Image as ImageIcon, Camera, Languages, Loader2, Eye } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Product, AppView, GeminiAnalysisResult, Language, Theme } from './types';
 import { Scanner } from './components/Scanner';
 import { ProductDatabase } from './components/ProductDatabase';
 import { Button } from './components/Button';
-import { analyzeProductImage, translateTextToArabic } from './services/geminiService';
+import { analyzeProductImage, translateTextToArabic, verifyVisualMatch } from './services/geminiService';
 import { saveProductsToDB, getProductsFromDB } from './services/db';
 import { translations } from './translations';
 
@@ -13,8 +13,9 @@ const App: React.FC = () => {
   const [view, setView] = useState<AppView>(AppView.HOME);
   const [products, setProducts] = useState<Product[]>([]);
   const [analyzing, setAnalyzing] = useState(false);
+  const [visualVerifying, setVisualVerifying] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
-  const [matchedProducts, setMatchedProducts] = useState<{product: Product, score: number}[]>([]);
+  const [matchedProducts, setMatchedProducts] = useState<{product: Product, score: number, visuallyVerified?: boolean}[]>([]);
   const [geminiResult, setGeminiResult] = useState<GeminiAnalysisResult | null>(null);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [isLoadingDB, setIsLoadingDB] = useState(true);
@@ -138,65 +139,72 @@ const App: React.FC = () => {
     setCapturedImage(imageData);
     setView(AppView.RESULT);
     setAnalyzing(true);
+    setVisualVerifying(false);
     setMatchedProducts([]);
     setGeminiResult(null);
 
     try {
+      // 1. Text Analysis & Initial Search
       const analysis = await analyzeProductImage(imageData);
       setGeminiResult(analysis);
 
       if (products.length > 0) {
-        const results = products.map(p => {
+        let matches = products.map(product => {
           let score = 0;
-          const normalize = (str: string) => str.toLowerCase().replace(/[^\w\u0600-\u06FF]/g, ' ').trim();
-          
-          const pName = normalize(p.name);
-          const pBrand = normalize(p.brand);
-          const pCode = normalize(p.code);
-          
-          const dName = normalize(analysis.detectedName);
-          const dBrand = normalize(analysis.detectedBrand);
+          const pName = product.name.toLowerCase();
+          const pBrand = product.brand.toLowerCase();
+          const dName = analysis.detectedName.toLowerCase();
+          const dBrand = analysis.detectedBrand.toLowerCase();
 
-          const dNameTokens = dName.split(/\s+/).filter(t => t.length > 2);
-          const pNameTokens = pName.split(/\s+/).filter(t => t.length > 2);
-
-          if (pCode && dName.includes(pCode)) score += 200;
+          // Simple scoring logic without external libraries
           if (pName === dName) score += 100;
           else if (pName.includes(dName) || dName.includes(pName)) score += 60;
-
-          let matchedTokens = 0;
-          dNameTokens.forEach(token => {
-             if (pName.includes(token)) matchedTokens++;
-          });
-          if (matchedTokens > 0) score += (matchedTokens * 15);
-
-          if (pBrand && dBrand) {
-             if (pBrand.includes(dBrand) || dBrand.includes(pBrand)) score += 40;
-          }
-
-          const normalizedKeywords = analysis.keywords.map(k => normalize(k));
-          normalizedKeywords.forEach(k => {
-             if (!k) return;
-             if (pName.includes(k)) score += 20;
-             if (p.description && normalize(p.description).includes(k)) score += 5;
-             if (pNameTokens.includes(k)) score += 25;
+          
+          if (pBrand.includes(dBrand) || dBrand.includes(pBrand)) score += 40;
+          
+          analysis.keywords.forEach(k => {
+            if (pName.includes(k.toLowerCase())) score += 10;
           });
 
-          return { product: p, score };
-        });
+          return { product, score };
+        })
+        .filter(match => match.score > 30)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 5); // Take top 5 candidates
 
-        const bestMatches = results
-            .filter(r => r.score >= 15)
-            .sort((a, b) => b.score - a.score)
-            .slice(0, 5);
+        setMatchedProducts(matches);
+        setAnalyzing(false); // Stop initial spinner
 
-        setMatchedProducts(bestMatches);
+        // 2. Visual Verification Step (Re-ranking)
+        if (matches.length > 0) {
+           const candidatesWithImages = matches.filter(m => m.product.imageUrl && m.product.imageUrl.startsWith('http')).map(m => m.product);
+           
+           if (candidatesWithImages.length > 0) {
+              setVisualVerifying(true);
+              const bestMatchId = await verifyVisualMatch(imageData, candidatesWithImages);
+              
+              if (bestMatchId) {
+                 // Re-sort matches to put visual match at the top with a boost
+                 const newMatches = matches.map(m => {
+                    if (m.product.id === bestMatchId) {
+                        return { ...m, score: m.score + 200, visuallyVerified: true };
+                    }
+                    return m;
+                 }).sort((a, b) => b.score - a.score);
+                 
+                 setMatchedProducts(newMatches);
+              }
+              setVisualVerifying(false);
+           }
+        }
+      } else {
+        setAnalyzing(false);
       }
 
     } catch (error) {
       console.error("Analysis failed", error);
-    } finally {
       setAnalyzing(false);
+      setVisualVerifying(false);
     }
   };
 
@@ -450,6 +458,7 @@ const App: React.FC = () => {
                                   <span className="bg-white/20 backdrop-blur-sm px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest border border-white/10 text-blue-50">{t.aiAnalysis}</span>
                                 </div>
                                 <h2 className="text-3xl md:text-4xl font-bold mb-4 leading-tight">{geminiResult.detectedName}</h2>
+                                
                                 <div className="flex flex-wrap items-center gap-3">
                                     <span className="bg-white text-blue-700 px-4 py-1.5 rounded-full text-sm font-bold shadow-lg">{geminiResult.detectedBrand}</span>
                                     <div className="h-6 w-px bg-white/30 mx-1"></div>
@@ -464,18 +473,26 @@ const App: React.FC = () => {
                         </div>
 
                         <div>
-                            <div className="flex items-center gap-3 mb-6">
-                                <div className="bg-emerald-100 dark:bg-emerald-900/30 p-2 rounded-lg text-emerald-600 dark:text-emerald-400">
-                                  <Search size={20} />
+                            <div className="flex items-center justify-between gap-3 mb-6">
+                                <div className="flex items-center gap-3">
+                                    <div className="bg-emerald-100 dark:bg-emerald-900/30 p-2 rounded-lg text-emerald-600 dark:text-emerald-400">
+                                      <Search size={20} />
+                                    </div>
+                                    <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                                        {t.dbResults}
+                                    </h3>
                                 </div>
-                                <h3 className="text-xl font-bold text-gray-900 dark:text-white">
-                                    {t.dbResults}
-                                </h3>
+                                {visualVerifying && (
+                                    <div className="flex items-center gap-2 text-sm text-blue-600 dark:text-blue-400 animate-pulse bg-blue-50 dark:bg-blue-900/20 px-3 py-1 rounded-full">
+                                        <Eye size={16} />
+                                        <span>جاري التحقق البصري...</span>
+                                    </div>
+                                )}
                             </div>
                             {matchedProducts.length > 0 ? (
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                                     {matchedProducts.map((match, idx) => (
-                                        <div key={idx} className="group bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm hover:shadow-xl border border-gray-100 dark:border-gray-700 transition-all duration-300 hover:-translate-y-1 cursor-pointer flex gap-5" onClick={() => setSelectedProduct(match.product)}>
+                                        <div key={idx} className={`group bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm hover:shadow-xl border ${match.visuallyVerified ? 'border-green-400 dark:border-green-500 ring-1 ring-green-400 dark:ring-green-500' : 'border-gray-100 dark:border-gray-700'} transition-all duration-300 hover:-translate-y-1 cursor-pointer flex gap-5`} onClick={() => setSelectedProduct(match.product)}>
                                             <div className="w-28 h-28 bg-gray-100 dark:bg-gray-700 rounded-xl overflow-hidden flex-shrink-0 relative shadow-inner">
                                                 {match.product.imageUrl ? (
                                                     <img src={match.product.imageUrl} alt={match.product.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
@@ -484,8 +501,13 @@ const App: React.FC = () => {
                                                         <ImageIcon size={24} />
                                                     </div>
                                                 )}
-                                                {idx === 0 && (
-                                                  <div className="absolute top-0 right-0 bg-green-500 text-white text-[10px] font-bold px-2 py-1 rounded-bl-lg shadow-sm">
+                                                {match.visuallyVerified && (
+                                                  <div className="absolute top-0 right-0 bg-green-500 text-white text-[10px] font-bold px-2 py-1 rounded-bl-lg shadow-sm flex items-center gap-1">
+                                                    <Eye size={10} className="fill-white" /> مؤكد بصرياً
+                                                  </div>
+                                                )}
+                                                {!match.visuallyVerified && idx === 0 && (
+                                                  <div className="absolute top-0 right-0 bg-blue-500 text-white text-[10px] font-bold px-2 py-1 rounded-bl-lg shadow-sm">
                                                     {t.bestMatch}
                                                   </div>
                                                 )}
