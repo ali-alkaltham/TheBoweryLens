@@ -22,8 +22,13 @@ export const Scanner: React.FC<ScannerProps> = ({ onCapture, onCancel, t }) => {
 
   const startCamera = async () => {
     try {
+      // Updated constraints to request high resolution (4K ideal)
       const mediaStream = await navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: 'environment' } 
+        video: { 
+          facingMode: 'environment',
+          width: { ideal: 3840 },
+          height: { ideal: 2160 } 
+        } 
       });
       setStream(mediaStream);
       if (videoRef.current) {
@@ -50,7 +55,8 @@ export const Scanner: React.FC<ScannerProps> = ({ onCapture, onCancel, t }) => {
       const ctx = canvas.getContext('2d');
       if (ctx) {
         ctx.drawImage(videoRef.current, 0, 0);
-        const imageData = canvas.toDataURL('image/jpeg', 0.8);
+        // Changed quality from 0.8 to 1.0 (Maximum quality, no compression)
+        const imageData = canvas.toDataURL('image/jpeg', 1.0);
         stopCamera();
         onCapture(imageData);
       }
@@ -106,7 +112,8 @@ export const Scanner: React.FC<ScannerProps> = ({ onCapture, onCancel, t }) => {
   }
 
   return (
-    <div className="fixed inset-0 bg-black z-50 flex flex-col">
+    // Responsive layout: flex-col for portrait, flex-row for landscape
+    <div className="fixed inset-0 bg-black z-50 flex flex-col landscape:flex-row">
       <div className="relative flex-1 overflow-hidden bg-gray-900">
         <video 
           ref={videoRef} 
@@ -134,8 +141,11 @@ export const Scanner: React.FC<ScannerProps> = ({ onCapture, onCancel, t }) => {
         </div>
       </div>
 
-      {/* Bottom Bar - Improved Layout */}
-      <div className="h-36 bg-black flex items-center justify-around px-8 pb-8 pt-4">
+      {/* Control Bar - Responsive Layout */}
+      <div className="bg-black flex items-center z-20
+                      h-36 w-full flex-row justify-around px-8 pb-8 pt-4        /* Portrait Styles */
+                      landscape:h-full landscape:w-32 landscape:flex-col landscape:justify-center landscape:gap-8 landscape:px-0 landscape:py-0 landscape:border-l landscape:border-gray-800 /* Landscape Styles */
+      ">
         
         <button 
             onClick={() => { stopCamera(); startCamera(); }} 
